@@ -96,3 +96,51 @@ INSERT INTO LUGAR (nombre, pais, region, latitud, longitud, tipo_zona) VALUES
 ('Puerto Azul', 'España', 'Valencia', 39.4699, -0.3763, 'Costera'),
 ('Cerro del Águila', 'España', 'Granada', 37.1773, -3.5986, 'Montañosa'),
 ('Zona Industrial 7', 'España', 'Bilbao', 43.2630, -2.9350, 'Industrial');
+
+-- INSERT CASO
+INSERT INTO CASO (titulo, categoria, estado, fecha_incidente, id_investigador_lead, id_lugar) VALUES
+('Robo en el Parque Central', 'Robo', 'Abierto', '2024-01-15', 1, 1),
+('Incendio en Zona Industrial', 'Incendio', 'Cerrado', '2023-11-02', 5, 5),
+('Desaparición en Bosque del Norte', 'Desaparición', 'En Proceso', '2024-02-20', 3, 2),
+('Fraude Digital Masivo', 'Cibercrimen', 'Abierto', '2024-03-10', 2, 1),
+('Homicidio en Puerto Azul', 'Homicidio', 'En Proceso', '2024-01-28', 1, 3);
+
+-- INSERT CASO_INVESTIGADOR
+INSERT INTO CASO_INVESTIGADOR (id_caso, id_investigador, rol, fecha_asignacion) VALUES
+(1, 1, 'Líder', '2024-01-15'),
+(1, 4, 'Apoyo', '2024-01-16'),
+(2, 5, 'Líder', '2023-11-02'),
+(3, 3, 'Líder', '2024-02-20'),
+(3, 1, 'Apoyo', '2024-02-21'),
+(4, 2, 'Líder', '2024-03-10'),
+(4, 1, 'Apoyo', '2024-03-11'),
+(5, 1, 'Líder', '2024-01-28'),
+(5, 3, 'Forense', '2024-01-29');
+
+-- INSERT EVIDENCIA
+INSERT INTO EVIDENCIA (id_caso, tipo, descripcion, nivel_credibilidad, fecha_recoleccion) VALUES
+(1, 'Huella', 'Huella dactilar encontrada en un banco del parque', 'Alta', '2024-01-16'),
+(1, 'Video', 'Grabación de cámara de seguridad', 'Media', '2024-01-16'),
+(2, 'Residuo', 'Restos de acelerante en el suelo', 'Alta', '2023-11-03'),
+(3, 'Objeto Personal', 'Mochila encontrada cerca del sendero', 'Alta', '2024-02-21'),
+(3, 'Ropa', 'Chaqueta rasgada con manchas', 'Media', '2024-02-22'),
+(4, 'Registro Digital', 'IP vinculada al ataque', 'Alta', '2024-03-11'),
+(5, 'Arma Blanca', 'Cuchillo con huellas parciales', 'Alta', '2024-01-29'),
+(5, 'Sangre', 'Muestra de sangre en el muelle', 'Alta', '2024-01-29');
+
+-- INSERT TESTIGO
+INSERT INTO TESTIGO (id_caso, nombre, contacto, declaracion, fiabilidad) VALUES
+(1, 'Javier López', 'javier@mail.com', 'Vio a un hombre correr tras escuchar un grito.', 7),
+(1, 'María Santos', 'maria@mail.com', 'Escuchó ruidos extraños cerca del parque.', 5),
+(2, 'Pedro Gómez', 'pedro@mail.com', 'Vio humo antes de que iniciara el incendio.', 8),
+(3, 'Lucía Herrera', 'lucia@mail.com', 'Vio a la persona desaparecida caminando sola.', 6),
+(4, 'Andrés Molina', 'andres@mail.com', 'Recibió un correo sospechoso antes del ataque.', 9),
+(5, 'Elena Rivas', 'elena@mail.com', 'Escuchó una discusión fuerte en el muelle.', 7);
+
+-- INSERT INFORME
+INSERT INTO INFORME (id_caso, id_investigador, contenido, conclusion, fecha_emision) VALUES
+(1, 1, 'Se revisaron cámaras y se recolectaron huellas.', 'Se requiere análisis adicional.', '2024-01-20'),
+(2, 5, 'El incendio fue provocado con acelerante.', 'Caso cerrado por falta de sospechosos.', '2023-11-10'),
+(3, 3, 'Se hallaron objetos personales cerca del sendero.', 'Posible secuestro.', '2024-02-25'),
+(4, 2, 'Ataque digital coordinado desde múltiples IP.', 'Investigación continúa.', '2024-03-12'),
+(5, 1, 'Se encontró arma blanca con huellas parciales.', 'Se sospecha de un conflicto previo.', '2024-01-30');
