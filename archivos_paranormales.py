@@ -502,3 +502,468 @@ def anadir_caso():
         print(f" Error: {e}")
     finally:
         conn.close()
+ 
+ 
+def _anadir_investigador_a_caso(id_caso, conn_externa=None):
+    """
+    Anade un investigador existente a un caso como miembro del equipo.
+    Puede recibir una conexion externa (si se llama desde anadir_caso)
+    o crear su propia conexion si se llama de forma independiente.
+    Valida que:
+      - Si el rol es Lider, el investigador tenga nivel Alto
+      - No haya ya un Lider asignado al caso
+      - El investigador no este ya asignado al mismo caso
+    """
+    # Determina si se usa una conexion ya abierta o se crea una nueva
+    usar_conn_externa = conn_externa is not None
+    conn = conn_externa if usar_conn_externa else conectar()
+    if not conn:
+        return
+ 
+    try:
+        cur = conn.cursor()
+        # Muestra los investigadores ya asignados al caso
+        ver_investigadores_de_caso(id_caso, conn)
+ 
+        # Muestra todos los investigadores disponibles para anadir
+        cur.execute("SELECT id_investigador, nombre, nivel_acceso FROM INVESTIGADOR")
+        todos = cur.fetchall()
+        print("\n  Todos los investigadores disponibles:")
+        sep()
+        for f in todos:
+            print(f"  [{f[0]}] {f[1]} — Nivel: {f[2]}")
+        sep()
+ 
+        id_inv = input("ID del investigador a anadir: ").strip()
+        rol    = input("Rol (Lider / Forense / Apoyo): ").strip()
+ 
+        # Bloque de validacion especifica para el rol Lider
+        if rol.strip().lower() in ("lider", "lider"):
+            rol = "Lider"
+            # Comprueba que el investigador tenga nivel Alto
+            cur.execute("""
+                SELECT nivel_acceso FROM INVESTIGADOR
+                WHERE id_investigador = %s AND LOWER(nivel_acceso) = 'alto'
+            """, (id_inv,))
+            if not cur.fetchone():
+                print(" Solo investigadores con nivel de acceso Alto pueden ser Lider.")
+                return
+ 
+            # Comprueba que no haya ya un Lider en el caso
+            cur.execute("""
+                SELECT COUNT(*) FROM CASO_INVESTIGADOR
+                WHERE id_caso = %s AND rol = 'Lider'
+            """, (id_caso,))
+            if cur.fetchone()[0] > 0:
+                print(" Ya existe un Lider asignado a este caso. Solo puede haber uno.")
+                return
+ 
+        # Comprueba que el investigador no este ya asignado a este caso
+        cur.execute("""
+            SELECT COUNT(*) FROM CASO_INVESTIGADOR
+            WHERE id_caso = %s AND id_investigador = %s
+        """, (id_caso, id_inv))
+        if cur.fetchone()[0] > 0:
+            print(" Este investigador ya esta asignado a este caso.")
+            return
+ 
+        # Inserta la relacion caso-investigador con el rol elegido
+        cur.execute("""
+            INSERT INTO CASO_INVESTIGADOR (id_caso, id_investigador, rol, fecha_asignacion)
+            VALUES (%s, %s, %s, CURDATE())
+        """, (id_caso, id_inv, rol))
+ 
+        conn.commit()
+        print(f" Investigador anadido al caso con rol: {rol}")
+ 
+    except mariadb.Error as e:
+        conn.rollback()
+        print(f" Error: {e}")
+    finally:
+        # Solo cierra la conexion si fue creada por esta funcion (no si es externa)
+        if not usar_conn_externa:
+            conn.close()
+ 
+ 
+def _quitar_investigador_de_caso(id_caso):
+    """
+    Retira un investigador de un caso eliminando su fila en CASO_INVESTIGADOR.
+    Si el investigador a quitar es el Lider:
+      - Solo se permite si hay mas de un investigador en el caso
+      - Se pide confirmacion explicicta
+      - Se pone a NULL el campo id_investigador_lead en la tabla CASO
+    """
+    conn = conectar()
+    if not conn:
+        return
+    try:
+        cur = conn.cursor()
+        # Muestra los investigadores actuales del caso para elegir cual quitar
+        filas = ver_investigadores_de_caso(id_caso, conn)
+        if not filas:
+            print(" No hay investigadores asignados a este caso.")
+            return
+ 
+        id_inv = input("ID del investigador a quitar: ").strip()
+ 
+        # Verifica que el investigador elegido esta realmente asignado al caso
+        cur.execute("""
+            SELECT rol FROM CASO_INVESTIGADOR
+            WHERE id_caso = %s AND id_investigador = %s
+        """, (id_caso, id_inv))
+        fila_rol = cur.fetchone()
+        if not fila_rol:
+            print(" Ese investigador no esta asignado a este caso.")
+            return
+ 
+        rol_actual = fila_rol[0]
+ 
+        # Logica especial si el investigador a quitar es el Lider
+        if rol_actual == "Lider":
+            # Cuenta cuantos investigadores hay en total en el caso
+            cur.execute("SELECT COUNT(*) FROM CASO_INVESTIGADOR WHERE id_caso = %s", (id_caso,))
+            total = cur.fetchone()[0]
+            if total <= 1:
+                # No se puede dejar un caso sin ningun investigador
+                print(" No puedes quitar al Lider si es el unico investigador del caso.")
+                return
+            print("  Atencion: vas a quitar al Lider del caso.")
+            print("   El campo id_investigador_lead quedara vacio. Deberas asignar un nuevo Lider.")
+            conf = input("¿Confirmar? (s/n): ").strip().lower()
+            if conf != "s":
+                print("Cancelado.")
+                return
+            # Pone a NULL el lider en la tabla CASO
+            cur.execute("UPDATE CASO SET id_investigador_lead = NULL WHERE id_caso = %s", (id_caso,))
+ 
+        # Elimina la fila de la tabla intermedia CASO_INVESTIGADOR
+        cur.execute("""
+            DELETE FROM CASO_INVESTIGADOR
+            WHERE id_caso = %s AND id_investigador = %s
+        """, (id_caso, id_inv))
+ 
+        conn.commit()
+        print(" Investigador retirado del caso.")
+ 
+    except mariadb.Error as e:
+        conn.rollback()
+        print(f" Error: {e}")
+    finally:
+        conn.close()
+ 
+ 
+def actualizar_caso():
+    """
+    Modifica los datos generales de un caso (titulo, categoria, estado, lugar).
+    Tras actualizar los datos, abre un submenu para gestionar los
+    investigadores asignados (ver, anadir o quitar).
+    """
+    print("\n=== MODIFICAR CASO ===")
+    ver_casos()
+    id_caso = input("ID del caso a modificar: ").strip()
+ 
+    conn = conectar()
+    if not conn:
+        return
+    try:
+        cur = conn.cursor()
+        # Obtiene los datos actuales del caso
+        cur.execute("""
+            SELECT titulo, categoria, estado, id_lugar FROM CASO WHERE id_caso = %s
+        """, (id_caso,))
+        actual = cur.fetchone()
+        if not actual:
+            print(" Caso no encontrado.")
+            return
+ 
+        print(f"\n  Datos actuales:")
+        print(f"  Titulo    : {actual[0]}")
+        print(f"  Categoria : {actual[1]}")
+        print(f"  Estado    : {actual[2]}")
+        print(f"  ID Lugar  : {actual[3]}")
+        print("  (Deja en blanco para mantener el valor actual)")
+    except mariadb.Error as e:
+        print(f" Error: {e}")
+        conn.close()
+        return
+ 
+    ver_lugares()  # Muestra lugares disponibles para elegir nuevo ID si se desea
+    titulo    = input("\nNuevo titulo       : ").strip() or actual[0]
+    categoria = input("Nueva categoria    : ").strip() or actual[1]
+    estado    = input("Nuevo estado       : ").strip() or actual[2]
+    id_lugar  = input("Nuevo ID de lugar  : ").strip() or str(actual[3])
+ 
+    try:
+        cur.execute("""
+            UPDATE CASO SET titulo=%s, categoria=%s, estado=%s, id_lugar=%s
+            WHERE id_caso=%s
+        """, (titulo, categoria, estado, id_lugar, id_caso))
+        conn.commit()
+        print(" Datos del caso actualizados.")
+    except mariadb.Error as e:
+        conn.rollback()
+        print(f" Error: {e}")
+    finally:
+        conn.close()
+ 
+    # Submenu para gestionar el equipo de investigadores del caso
+    while True:
+        print(f"\n-- Gestion de investigadores del caso {id_caso} --")
+        print("1. Ver investigadores asignados")
+        print("2. Anadir investigador")
+        print("3. Quitar investigador")
+        print("0. Volver")
+        sub = input("Elige: ").strip()
+        if sub == "1":
+            # Abre una conexion nueva solo para ver (la anterior ya fue cerrada)
+            conn2 = conectar()
+            if conn2:
+                ver_investigadores_de_caso(id_caso, conn2)
+                conn2.close()
+        elif sub == "2":
+            _anadir_investigador_a_caso(id_caso)   # Crea su propia conexion
+        elif sub == "3":
+            _quitar_investigador_de_caso(id_caso)  # Crea su propia conexion
+        elif sub == "0":
+            break
+        else:
+            print("Opcion no valida.")
+ 
+ 
+def eliminar_caso():
+    """
+    Elimina un caso y todos sus registros dependientes en cascada manual:
+    testigos, evidencias, informes, relaciones con investigadores y el propio caso.
+    Pide confirmacion antes de proceder.
+    Usa una transaccion explicita para que todo sea atomico.
+    """
+    print("\n=== ELIMINAR CASO ===")
+    ver_casos()
+    id_caso = input("ID a eliminar: ").strip()
+    conf = input("¿Seguro? (s/n): ").strip().lower()
+ 
+    if conf != "s":
+        print("Cancelado.")
+        return
+ 
+    conn = conectar()
+    if not conn:
+        return
+    try:
+        conn.begin()  # Inicia la transaccion explicitamente
+        cur = conn.cursor()
+        # Elimina en orden para respetar las claves foraneas
+        cur.execute("DELETE FROM TESTIGO WHERE id_caso=%s", (id_caso,))
+        cur.execute("DELETE FROM EVIDENCIA WHERE id_caso=%s", (id_caso,))
+        cur.execute("DELETE FROM INFORME WHERE id_caso=%s", (id_caso,))
+        cur.execute("DELETE FROM CASO_INVESTIGADOR WHERE id_caso=%s", (id_caso,))
+        cur.execute("DELETE FROM CASO WHERE id_caso=%s", (id_caso,))
+        conn.commit()  # Confirma todos los DELETE a la vez
+        print(" Caso eliminado.")
+    except mariadb.Error as e:
+        conn.rollback()  # Si algo falla, deshace todos los DELETE
+        print(f" Error: {e}")
+    finally:
+        conn.close()
+ 
+ 
+# ===============================================================
+# CRUD — TESTIGOS
+# Operaciones: Ver, Anadir, Actualizar, Eliminar
+# ===============================================================
+ 
+def ver_testigos():
+    """
+    Muestra todos los testigos registrados con el titulo del caso al que pertenecen,
+    su nombre y su nivel de fiabilidad.
+    """
+    print("\n=== TESTIGOS ===")
+    conn = conectar()
+    if not conn:
+        return
+    try:
+        cur = conn.cursor()
+        # JOIN con CASO para mostrar el titulo en vez del id_caso
+        cur.execute("""
+            SELECT t.id_testigo, c.titulo, t.nombre, t.fiabilidad
+            FROM TESTIGO t
+            JOIN CASO c ON t.id_caso = c.id_caso
+            ORDER BY t.id_testigo
+        """)
+        filas = cur.fetchall()
+        sep()
+        for f in filas:
+            print(f"[{f[0]}] Caso: {f[1]} | Testigo: {f[2]} | Fiabilidad: {f[3]}")
+        sep()
+    except mariadb.Error as e:
+        print(f" Error: {e}")
+    finally:
+        conn.close()
+ 
+ 
+def anadir_testigo():
+    """
+    Registra un nuevo testigo vinculado a un caso existente.
+    Recoge nombre, contacto, declaracion y nivel de fiabilidad (1-10).
+    """
+    print("\n=== AÑADIR TESTIGO ===")
+    ver_casos()  # Muestra los casos para elegir a cual vincular el testigo
+    id_caso     = input("ID del caso: ").strip()
+    nombre      = input("Nombre del testigo: ").strip()
+    contacto    = input("Contacto: ").strip()
+    declaracion = input("Declaracion: ").strip()
+    fiabilidad  = input("Fiabilidad (1-10): ").strip()
+ 
+    conn = conectar()
+    if not conn:
+        return
+    try:
+        cur = conn.cursor()
+        cur.execute("""
+            INSERT INTO TESTIGO (id_caso, nombre, contacto, declaracion, fiabilidad)
+            VALUES (%s, %s, %s, %s, %s)
+        """, (id_caso, nombre, contacto, declaracion, fiabilidad))
+        conn.commit()
+        print(" Testigo anadido.")
+    except mariadb.Error as e:
+        conn.rollback()
+        print(f" Error: {e}")
+    finally:
+        conn.close()
+ 
+ 
+def actualizar_testigo():
+    """
+    Modifica los datos de un testigo existente.
+    Los campos vacios conservan el valor actual.
+    """
+    print("\n=== MODIFICAR TESTIGO ===")
+    ver_testigos()
+    id_t = input("ID del testigo a modificar: ").strip()
+ 
+    conn = conectar()
+    if not conn:
+        return
+    try:
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT nombre, contacto, declaracion, fiabilidad
+            FROM TESTIGO WHERE id_testigo = %s
+        """, (id_t,))
+        actual = cur.fetchone()
+        if not actual:
+            print(" Testigo no encontrado.")
+            return
+ 
+        print(f"\n  Datos actuales:")
+        print(f"  Nombre      : {actual[0]}")
+        print(f"  Contacto    : {actual[1]}")
+        print(f"  Declaracion : {actual[2]}")
+        print(f"  Fiabilidad  : {actual[3]}")
+        print("  (Deja en blanco para mantener el valor actual)")
+ 
+        nombre      = input("\nNombre      : ").strip() or actual[0]
+        contacto    = input("Contacto    : ").strip() or actual[1]
+        declaracion = input("Declaracion : ").strip() or actual[2]
+        fiabilidad  = input("Fiabilidad (1-10): ").strip() or str(actual[3])
+ 
+        cur.execute("""
+            UPDATE TESTIGO
+            SET nombre=%s, contacto=%s, declaracion=%s, fiabilidad=%s
+            WHERE id_testigo=%s
+        """, (nombre, contacto, declaracion, fiabilidad, id_t))
+        conn.commit()
+        print(" Testigo actualizado.")
+    except mariadb.Error as e:
+        conn.rollback()
+        print(f" Error: {e}")
+    finally:
+        conn.close()
+ 
+ 
+def eliminar_testigo():
+    """
+    Elimina un testigo de la base de datos por su ID.
+    """
+    print("\n=== ELIMINAR TESTIGO ===")
+    ver_testigos()
+    id_t = input("ID del testigo a eliminar: ").strip()
+ 
+    conn = conectar()
+    if not conn:
+        return
+    try:
+        cur = conn.cursor()
+        cur.execute("DELETE FROM TESTIGO WHERE id_testigo=%s", (id_t,))
+        conn.commit()
+        print(" Testigo eliminado.")
+    except mariadb.Error as e:
+        conn.rollback()
+        print(f" Error: {e}")
+    finally:
+        conn.close()
+ 
+ 
+# ===============================================================
+# CRUD — EVIDENCIAS
+# Operaciones: Ver, Anadir, Actualizar, Eliminar
+# ===============================================================
+ 
+def ver_evidencias():
+    """
+    Muestra todas las evidencias con el titulo del caso al que pertenecen,
+    su tipo y nivel de credibilidad.
+    """
+    print("\n=== EVIDENCIAS ===")
+    conn = conectar()
+    if not conn:
+        return
+    try:
+        cur = conn.cursor()
+        # JOIN con CASO para mostrar titulo del caso en vez del ID
+        cur.execute("""
+            SELECT e.id_evidencia, c.titulo, e.tipo, e.nivel_credibilidad
+            FROM EVIDENCIA e
+            JOIN CASO c ON e.id_caso = c.id_caso
+            ORDER BY e.id_evidencia
+        """)
+        filas = cur.fetchall()
+        sep()
+        for f in filas:
+            print(f"[{f[0]}] Caso: {f[1]} | {f[2]} | Credibilidad: {f[3]}")
+        sep()
+    except mariadb.Error as e:
+        print(f" Error: {e}")
+    finally:
+        conn.close()
+ 
+ 
+def anadir_evidencia():
+    """
+    Registra una nueva evidencia vinculada a un caso existente.
+    Recoge tipo, descripcion, nivel de credibilidad y fecha de recoleccion.
+    """
+    print("\n=== AÑADIR EVIDENCIA ===")
+    ver_casos()  # Muestra los casos para elegir a cual vincular la evidencia
+    id_caso = input("ID del caso   : ").strip()
+    tipo    = input("Tipo          : ").strip()
+    desc    = input("Descripcion   : ").strip()
+    credib  = input("Credibilidad  : ").strip()
+    fecha   = input("Fecha (YYYY-MM-DD): ").strip()
+ 
+    conn = conectar()
+    if not conn:
+        return
+    try:
+        cur = conn.cursor()
+        cur.execute("""
+            INSERT INTO EVIDENCIA (id_caso, tipo, descripcion, nivel_credibilidad, fecha_recoleccion)
+            VALUES (%s, %s, %s, %s, %s)
+        """, (id_caso, tipo, desc, credib, fecha))
+        conn.commit()
+        print(" Evidencia registrada.")
+    except mariadb.Error as e:
+        conn.rollback()
+        print(f" Error: {e}")
+    finally:
+        conn.close()
