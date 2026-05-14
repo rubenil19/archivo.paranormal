@@ -967,3 +967,474 @@ def anadir_evidencia():
         print(f" Error: {e}")
     finally:
         conn.close()
+ 
+ 
+def actualizar_evidencia():
+    """
+    Modifica los datos de una evidencia existente.
+    Los campos vacios conservan el valor actual.
+    """
+    print("\n=== MODIFICAR EVIDENCIA ===")
+    ver_evidencias()
+    id_ev = input("ID de la evidencia a modificar: ").strip()
+ 
+    conn = conectar()
+    if not conn:
+        return
+    try:
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT tipo, descripcion, nivel_credibilidad, fecha_recoleccion
+            FROM EVIDENCIA WHERE id_evidencia = %s
+        """, (id_ev,))
+        actual = cur.fetchone()
+        if not actual:
+            print(" Evidencia no encontrada.")
+            return
+ 
+        print(f"\n  Datos actuales:")
+        print(f"  Tipo          : {actual[0]}")
+        print(f"  Descripcion   : {actual[1]}")
+        print(f"  Credibilidad  : {actual[2]}")
+        print(f"  Fecha         : {actual[3]}")
+        print("  (Deja en blanco para mantener el valor actual)")
+ 
+        tipo   = input("\nTipo          : ").strip() or actual[0]
+        desc   = input("Descripcion   : ").strip() or actual[1]
+        credib = input("Credibilidad  : ").strip() or str(actual[2])
+        fecha  = input("Fecha (YYYY-MM-DD): ").strip() or str(actual[3])
+ 
+        cur.execute("""
+            UPDATE EVIDENCIA
+            SET tipo=%s, descripcion=%s, nivel_credibilidad=%s, fecha_recoleccion=%s
+            WHERE id_evidencia=%s
+        """, (tipo, desc, credib, fecha, id_ev))
+        conn.commit()
+        print(" Evidencia actualizada.")
+    except mariadb.Error as e:
+        conn.rollback()
+        print(f" Error: {e}")
+    finally:
+        conn.close()
+ 
+ 
+def eliminar_evidencia():
+    """
+    Elimina una evidencia de la base de datos por su ID.
+    """
+    print("\n=== ELIMINAR EVIDENCIA ===")
+    ver_evidencias()
+    id_ev = input("ID a eliminar: ").strip()
+ 
+    conn = conectar()
+    if not conn:
+        return
+    try:
+        cur = conn.cursor()
+        cur.execute("DELETE FROM EVIDENCIA WHERE id_evidencia=%s", (id_ev,))
+        conn.commit()
+        print(" Evidencia eliminada.")
+    except mariadb.Error as e:
+        conn.rollback()
+        print(f" Error: {e}")
+    finally:
+        conn.close()
+ 
+ 
+# ===============================================================
+# CRUD — INFORMES
+# Operaciones: Ver, Anadir, Actualizar, Eliminar
+# Solo los investigadores asignados al caso pueden redactar informes
+# ===============================================================
+ 
+def ver_informes():
+    """
+    Muestra todos los informes con el titulo del caso, el nombre del investigador
+    redactor, la conclusion y la fecha de emision.
+    """
+    print("\n=== INFORMES ===")
+    conn = conectar()
+    if not conn:
+        return
+    try:
+        cur = conn.cursor()
+        # JOIN con CASO e INVESTIGADOR para mostrar nombres en vez de IDs
+        cur.execute("""
+            SELECT inf.id_informe, c.titulo, i.nombre, inf.conclusion, inf.fecha_emision
+            FROM INFORME inf
+            JOIN CASO c ON inf.id_caso = c.id_caso
+            JOIN INVESTIGADOR i ON inf.id_investigador = i.id_investigador
+            ORDER BY inf.id_informe
+        """)
+        filas = cur.fetchall()
+        sep()
+        for f in filas:
+            print(f"[{f[0]}] Caso: {f[1]} | Redactor: {f[2]} | Conclusion: {f[3]} | Fecha: {f[4]}")
+        sep()
+    except mariadb.Error as e:
+        print(f" Error: {e}")
+    finally:
+        conn.close()
+ 
+ 
+def anadir_informe():
+    """
+    Registra un nuevo informe para un caso existente.
+    Solo pueden redactar informes los investigadores asignados a ese caso.
+    Valida que el investigador elegido este en CASO_INVESTIGADOR para ese caso.
+    """
+    print("\n=== AÑADIR INFORME ===")
+    ver_casos()
+    id_caso = input("ID del caso: ").strip()
+ 
+    conn = conectar()
+    if not conn:
+        return
+    try:
+        cur = conn.cursor()
+        # Obtiene solo los investigadores asignados al caso elegido
+        cur.execute("""
+            SELECT ci.id_investigador, i.nombre, ci.rol
+            FROM CASO_INVESTIGADOR ci
+            JOIN INVESTIGADOR i ON ci.id_investigador = i.id_investigador
+            WHERE ci.id_caso = %s
+        """, (id_caso,))
+        asignados = cur.fetchall()
+        if not asignados:
+            print(" No hay investigadores asignados a este caso.")
+            return
+        print("\n  Investigadores asignados a este caso:")
+        sep()
+        for f in asignados:
+            print(f"  [{f[0]}] {f[1]} — Rol: {f[2]}")
+        sep()
+ 
+        id_inv = input("ID del investigador redactor: ").strip()
+ 
+        # Verifica que el investigador elegido este realmente en el caso
+        cur.execute("""
+            SELECT COUNT(*) FROM CASO_INVESTIGADOR
+            WHERE id_caso = %s AND id_investigador = %s
+        """, (id_caso, id_inv))
+        if cur.fetchone()[0] == 0:
+            print(" Ese investigador no esta asignado a este caso.")
+            return
+ 
+        contenido  = input("Contenido      : ").strip()
+        conclusion = input("Conclusion     : ").strip()
+        fecha      = input("Fecha emision (YYYY-MM-DD): ").strip()
+ 
+        cur.execute("""
+            INSERT INTO INFORME (id_caso, id_investigador, contenido, conclusion, fecha_emision)
+            VALUES (%s, %s, %s, %s, %s)
+        """, (id_caso, id_inv, contenido, conclusion, fecha))
+        conn.commit()
+        print(" Informe registrado.")
+    except mariadb.Error as e:
+        conn.rollback()
+        print(f" Error: {e}")
+    finally:
+        conn.close()
+ 
+ 
+def actualizar_informe():
+    """
+    Modifica el contenido, conclusion y fecha de emision de un informe existente.
+    Los campos vacios conservan el valor actual.
+    """
+    print("\n=== MODIFICAR INFORME ===")
+    ver_informes()
+    id_inf = input("ID del informe a modificar: ").strip()
+ 
+    conn = conectar()
+    if not conn:
+        return
+    try:
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT contenido, conclusion, fecha_emision FROM INFORME WHERE id_informe = %s
+        """, (id_inf,))
+        actual = cur.fetchone()
+        if not actual:
+            print(" Informe no encontrado.")
+            return
+ 
+        print(f"\n  Datos actuales:")
+        print(f"  Contenido  : {actual[0]}")
+        print(f"  Conclusion : {actual[1]}")
+        print(f"  Fecha      : {actual[2]}")
+        print("  (Deja en blanco para mantener el valor actual)")
+ 
+        contenido  = input("\nNuevo contenido    : ").strip() or actual[0]
+        conclusion = input("Nueva conclusion   : ").strip() or actual[1]
+        fecha      = input("Nueva fecha emision (YYYY-MM-DD): ").strip() or str(actual[2])
+ 
+        cur.execute("""
+            UPDATE INFORME
+            SET contenido=%s, conclusion=%s, fecha_emision=%s
+            WHERE id_informe=%s
+        """, (contenido, conclusion, fecha, id_inf))
+        conn.commit()
+        print(" Informe actualizado.")
+    except mariadb.Error as e:
+        conn.rollback()
+        print(f" Error: {e}")
+    finally:
+        conn.close()
+ 
+ 
+def eliminar_informe():
+    """
+    Elimina un informe de la base de datos por su ID.
+    Pide confirmacion antes de proceder.
+    """
+    print("\n=== ELIMINAR INFORME ===")
+    ver_informes()
+    id_inf = input("ID del informe a eliminar: ").strip()
+    conf   = input("¿Seguro? (s/n): ").strip().lower()
+    if conf != "s":
+        print("Cancelado.")
+        return
+ 
+    conn = conectar()
+    if not conn:
+        return
+    try:
+        cur = conn.cursor()
+        cur.execute("DELETE FROM INFORME WHERE id_informe = %s", (id_inf,))
+        conn.commit()
+        print(" Informe eliminado.")
+    except mariadb.Error as e:
+        conn.rollback()
+        print(f" Error: {e}")
+    finally:
+        conn.close()
+ 
+ 
+# ===============================================================
+# ESTADISTICAS COMPLETAS
+# Muestra resumenes agrupados por varias dimensiones
+# ===============================================================
+ 
+def ver_estadisticas():
+    """
+    Muestra un panel de estadisticas generales del sistema con 5 consultas:
+      1. Casos por estado
+      2. Casos asignados por investigador
+      3. Evidencias por caso
+      4. Testigos por caso
+      5. Informes por caso
+      6. Informes por investigador
+    Todas usan GROUP BY y COUNT con LEFT JOIN para incluir registros sin datos asociados.
+    """
+    print("\n" + "═" * 60)
+    print("  ESTADISTICAS GENERALES DEL SISTEMA")
+    print("═" * 60)
+ 
+    conn = conectar()
+    if not conn:
+        return
+ 
+    try:
+        cur = conn.cursor()
+ 
+        # 1. Cuantos casos hay en cada estado
+        print("\n  CASOS POR ESTADO")
+        print("─" * 60)
+        cur.execute("SELECT estado, COUNT(*) FROM CASO GROUP BY estado")
+        for estado, total in cur.fetchall():
+            print(f"• {estado:<20} → {total} caso(s)")
+ 
+        # 2. Cuantos casos tiene asignados cada investigador
+        print("\n  CASOS POR INVESTIGADOR")
+        print("─" * 60)
+        cur.execute("""
+            SELECT i.nombre, COUNT(ci.id_caso)
+            FROM INVESTIGADOR i
+            LEFT JOIN CASO_INVESTIGADOR ci ON i.id_investigador = ci.id_investigador
+            GROUP BY i.id_investigador
+            ORDER BY COUNT(ci.id_caso) DESC
+        """)
+        for nombre, total in cur.fetchall():
+            print(f"• {nombre:<20} → {total} caso(s)")
+ 
+        # 3. Cuantas evidencias tiene registradas cada caso
+        print("\n  EVIDENCIAS POR CASO")
+        print("─" * 60)
+        cur.execute("""
+            SELECT c.titulo, COUNT(e.id_evidencia)
+            FROM CASO c
+            LEFT JOIN EVIDENCIA e ON c.id_caso = e.id_caso
+            GROUP BY c.id_caso
+            ORDER BY COUNT(e.id_evidencia) DESC
+        """)
+        for titulo, total in cur.fetchall():
+            print(f"• {titulo:<30} → {total} evidencia(s)")
+ 
+        # 4. Cuantos testigos tiene registrados cada caso
+        print("\n  TESTIGOS POR CASO")
+        print("─" * 60)
+        cur.execute("""
+            SELECT c.titulo, COUNT(t.id_testigo)
+            FROM CASO c
+            LEFT JOIN TESTIGO t ON c.id_caso = t.id_caso
+            GROUP BY c.id_caso
+            ORDER BY COUNT(t.id_testigo) DESC
+        """)
+        for titulo, total in cur.fetchall():
+            print(f"• {titulo:<30} → {total} testigo(s)")
+ 
+        # 5. Cuantos informes tiene cada caso
+        print("\n  INFORMES POR CASO")
+        print("─" * 60)
+        cur.execute("""
+            SELECT c.titulo, COUNT(inf.id_informe)
+            FROM CASO c
+            LEFT JOIN INFORME inf ON c.id_caso = inf.id_caso
+            GROUP BY c.id_caso
+            ORDER BY COUNT(inf.id_informe) DESC
+        """)
+        for titulo, total in cur.fetchall():
+            print(f"• {titulo:<30} → {total} informe(s)")
+ 
+        # 6. Cuantos informes ha redactado cada investigador
+        print("\n  INFORMES POR INVESTIGADOR")
+        print("─" * 60)
+        cur.execute("""
+            SELECT i.nombre, COUNT(inf.id_informe)
+            FROM INVESTIGADOR i
+            LEFT JOIN INFORME inf ON i.id_investigador = inf.id_investigador
+            GROUP BY i.id_investigador
+            ORDER BY COUNT(inf.id_informe) DESC
+        """)
+        for nombre, total in cur.fetchall():
+            print(f"• {nombre:<20} → {total} informe(s)")
+ 
+        print("\n" + "═" * 60)
+ 
+    except mariadb.Error as e:
+        print(f" Error: {e}")
+    finally:
+        conn.close()
+ 
+ 
+# ===============================================================
+# MENU PRINCIPAL
+# Punto de entrada a todas las secciones del sistema
+# ===============================================================
+ 
+def menu_principal():
+    """
+    Bucle principal de la aplicacion. Muestra el menu de primer nivel
+    y redirige a los submenus de cada entidad (Investigadores, Lugares,
+    Casos, Evidencias, Testigos, Informes) o a las Estadisticas.
+    El programa termina cuando el usuario elige la opcion 0.
+    """
+    while True:
+        print("\n" + "═" * 55)
+        print("   ARCHIVOS PARANORMALES")
+        print("═" * 55)
+        print("1. Investigadores")
+        print("2. Lugares")
+        print("3. Casos")
+        print("4. Evidencias")
+        print("5. Estadisticas")
+        print("6. Testigos")
+        print("7. Informes")
+        print("0. Salir")
+        print("─" * 55)
+        op = input("Elige: ").strip()
+ 
+        if op == "1":
+            # Submenu de Investigadores
+            while True:
+                print("\n-- INVESTIGADORES --")
+                print("1. Ver  2. Anadir  3. Modificar  4. Eliminar  0. Volver")
+                sub = input("Elige: ").strip()
+                if   sub == "1": ver_investigadores(); pausar()
+                elif sub == "2": anadir_investigador(); pausar()
+                elif sub == "3": actualizar_investigador(); pausar()
+                elif sub == "4": eliminar_investigador(); pausar()
+                elif sub == "0": break
+ 
+        elif op == "2":
+            # Submenu de Lugares
+            while True:
+                print("\n-- LUGARES --")
+                print("1. Ver  2. Anadir  3. Modificar  4. Eliminar  0. Volver")
+                sub = input("Elige: ").strip()
+                if   sub == "1": ver_lugares(); pausar()
+                elif sub == "2": anadir_lugar(); pausar()
+                elif sub == "3": actualizar_lugar(); pausar()
+                elif sub == "4": eliminar_lugar(); pausar()
+                elif sub == "0": break
+ 
+        elif op == "3":
+            # Submenu de Casos
+            while True:
+                print("\n-- CASOS --")
+                print("1. Ver  2. Anadir  3. Modificar  4. Eliminar  0. Volver")
+                sub = input("Elige: ").strip()
+                if   sub == "1": ver_casos(); pausar()
+                elif sub == "2": anadir_caso(); pausar()
+                elif sub == "3": actualizar_caso(); pausar()
+                elif sub == "4": eliminar_caso(); pausar()
+                elif sub == "0": break
+ 
+        elif op == "4":
+            # Submenu de Evidencias
+            while True:
+                print("\n-- EVIDENCIAS --")
+                print("1. Ver  2. Anadir  3. Modificar  4. Eliminar  0. Volver")
+                sub = input("Elige: ").strip()
+                if   sub == "1": ver_evidencias(); pausar()
+                elif sub == "2": anadir_evidencia(); pausar()
+                elif sub == "3": actualizar_evidencia(); pausar()
+                elif sub == "4": eliminar_evidencia(); pausar()
+                elif sub == "0": break
+ 
+        elif op == "5":
+            # Muestra el panel de estadisticas y espera ENTER
+            ver_estadisticas()
+            pausar()
+ 
+        elif op == "6":
+            # Submenu de Testigos
+            while True:
+                print("\n-- TESTIGOS --")
+                print("1. Ver  2. Anadir  3. Modificar  4. Eliminar  0. Volver")
+                sub = input("Elige: ").strip()
+                if   sub == "1": ver_testigos(); pausar()
+                elif sub == "2": anadir_testigo(); pausar()
+                elif sub == "3": actualizar_testigo(); pausar()
+                elif sub == "4": eliminar_testigo(); pausar()
+                elif sub == "0": break
+ 
+        elif op == "7":
+            # Submenu de Informes
+            while True:
+                print("\n-- INFORMES --")
+                print("1. Ver  2. Anadir  3. Modificar  4. Eliminar  0. Volver")
+                sub = input("Elige: ").strip()
+                if   sub == "1": ver_informes(); pausar()
+                elif sub == "2": anadir_informe(); pausar()
+                elif sub == "3": actualizar_informe(); pausar()
+                elif sub == "4": eliminar_informe(); pausar()
+                elif sub == "0": break
+ 
+        elif op == "0":
+            # Cierra la aplicacion
+            print("\nCerrando el Archivo...\n")
+            break
+ 
+        else:
+            print("Opcion no valida.")
+ 
+ 
+# ---------------------------------------------------------------
+# PUNTO DE ENTRADA DEL PROGRAMA
+# Solo se ejecuta si se lanza este archivo directamente,
+# no si se importa como modulo desde otro script.
+# ---------------------------------------------------------------
+if __name__ == "__main__":
+    menu_principal()
